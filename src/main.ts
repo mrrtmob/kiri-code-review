@@ -4,11 +4,14 @@ import OpenAI from "openai";
 import { Octokit } from "@octokit/rest";
 import parseDiff, { Chunk, File } from "parse-diff";
 import minimatch from "minimatch";
+import axios from "axios";
 
 const GITHUB_TOKEN: string = core.getInput("GITHUB_TOKEN");
 const OPENAI_API_KEY: string = core.getInput("OPENAI_API_KEY");
 const OPENAI_API_MODEL: string = core.getInput("OPENAI_API_MODEL");
 const BOT_NAME: string = core.getInput("BOT_NAME") || "🤖 Code Review Bot";
+const TELEGRAM_BOT_TOKEN: string = core.getInput("TELEGRAM_BOT_TOKEN");
+const TELEGRAM_CHAT_ID: string = core.getInput("TELEGRAM_CHAT_ID");
 
 const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
@@ -22,6 +25,19 @@ interface PRDetails {
 	pull_number: number;
 	title: string;
 	description: string;
+}
+
+async function sendTelegramNotification(message: string): Promise<void> {
+	try {
+		const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+		await axios.post(telegramApiUrl, {
+			chat_id: TELEGRAM_CHAT_ID,
+			text: message,
+			parse_mode: "HTML",
+		});
+	} catch (error) {
+		console.error("Error sending Telegram notification:", error);
+	}
 }
 
 async function getPRDetails(): Promise<PRDetails> {
@@ -185,51 +201,110 @@ async function createReviewComment(
 }
 
 async function main() {
-	const prDetails = await getPRDetails();
-	let diff: string | null;
-	const eventData = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH ?? "", "utf8"));
+	try {
+		// Get PR details
+		const prDetails = await getPRDetails();
 
-	if (eventData.action === "opened") {
-		diff = await getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
-	} else if (eventData.action === "synchronize") {
-		const newBaseSha = eventData.before;
-		const newHeadSha = eventData.after;
+		// Initial Telegram notification
+		await sendTelegramNotification(
+			`🔍 New Code Review Started\n\n` +
+				`<b>Repository:</b> ${prDetails.owner}/${prDetails.repo}\n` +
+				`<b>PR Title:</b> ${prDetails.title}\n` +
+				`<b>PR Number:</b> #${prDetails.pull_number}\n` +
+				`<b>Description:</b>\n${prDetails.description.slice(0, 200)}...`
+		);
 
-		const response = await octokit.repos.compareCommits({
-			headers: {
-				accept: "application/vnd.github.v3.diff",
-			},
-			owner: prDetails.owner,
-			repo: prDetails.repo,
-			base: newBaseSha,
-			head: newHeadSha,
+		// Get the diff content
+		let diff: string | null;
+		const eventData = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH ?? "", "utf8"));
+
+		if (eventData.action === "opened") {
+			diff = await getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
+			await sendTelegramNotification(`📣 New PR opened - Starting initial review`);
+		} else if (eventData.action === "synchronize") {
+			const newBaseSha = eventData.before;
+			const newHeadSha = eventData.after;
+			const response = await octokit.repos.compareCommits({
+				headers: {
+					accept: "application/vnd.github.v3.diff",
+				},
+				owner: prDetails.owner,
+				repo: prDetails.repo,
+				base: newBaseSha,
+				head: newHeadSha,
+			});
+			diff = String(response.data);
+			await sendTelegramNotification(`📝 PR updated - Reviewing changes`);
+		} else {
+			console.log("Unsupported event:", process.env.GITHUB_EVENT_NAME);
+			await sendTelegramNotification(`⚠️ Unsupported event: ${process.env.GITHUB_EVENT_NAME}`);
+			return;
+		}
+
+		if (!diff) {
+			console.log("No diff found");
+			await sendTelegramNotification(`⚠️ No diff found in PR #${prDetails.pull_number}`);
+			return;
+		}
+
+		// Parse and filter diff
+		const parsedDiff = parseDiff(diff);
+		const excludePatterns = core
+			.getInput("exclude")
+			.split(",")
+			.map((s) => s.trim());
+
+		const filteredDiff = parsedDiff.filter((file) => {
+			return !excludePatterns.some((pattern) => minimatch(file.to ?? "", pattern));
 		});
 
-		diff = String(response.data);
-	} else {
-		console.log("Unsupported event:", process.env.GITHUB_EVENT_NAME);
-		return;
-	}
+		// Send notification about files being reviewed
+		const filesBeingReviewed = filteredDiff.map((file) => file.to).join("\n");
+		await sendTelegramNotification(`🔎 Reviewing ${filteredDiff.length} files:\n\n${filesBeingReviewed}`);
 
-	if (!diff) {
-		console.log("No diff found");
-		return;
-	}
+		// Analyze code and get comments
+		const comments = await analyzeCode(filteredDiff, prDetails);
 
-	const parsedDiff = parseDiff(diff);
+		if (comments.length > 0) {
+			// Create review comments on GitHub
+			await createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
 
-	const excludePatterns = core
-		.getInput("exclude")
-		.split(",")
-		.map((s) => s.trim());
+			// Format comments for Telegram
+			const commentSummary = comments
+				.map(
+					(comment) =>
+						`🔹 <b>File:</b> ${comment.path}\n` +
+						`<b>Line:</b> ${comment.line}\n` +
+						`<b>Comment:</b>\n${comment.body.replace(BOT_NAME + ":\n\n", "")}`
+				)
+				.join("\n\n");
 
-	const filteredDiff = parsedDiff.filter((file) => {
-		return !excludePatterns.some((pattern) => minimatch(file.to ?? "", pattern));
-	});
+			// Send detailed review results
+			await sendTelegramNotification(
+				`✅ Code Review Completed\n\n` + `Found ${comments.length} suggestions:\n\n${commentSummary}`
+			);
+		} else {
+			// No issues found
+			await sendTelegramNotification(
+				`✅ Code Review Completed\n\n` + `No issues found in PR #${prDetails.pull_number}`
+			);
+		}
+	} catch (error: unknown) {
+		// Error handling with proper type checking
+		const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
+		const errorStack = error instanceof Error ? error.stack : "No stack trace available";
 
-	const comments = await analyzeCode(filteredDiff, prDetails);
-	if (comments.length > 0) {
-		await createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
+		console.error("Error:", errorMessage);
+
+		// Send error notification to Telegram
+		await sendTelegramNotification(
+			`❌ Error During Code Review\n\n` +
+				`<b>Error Message:</b>\n${errorMessage}\n\n` +
+				`<b>Stack Trace:</b>\n${errorStack?.slice(0, 500) || "No stack trace available"}`
+		);
+
+		// Exit with error
+		process.exit(1);
 	}
 }
 
