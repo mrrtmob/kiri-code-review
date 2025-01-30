@@ -1,20 +1,24 @@
-name: Code Review with OpenAI
+name: AI Code Review
+
 on:
-  pull_request:
-    types:
-      - opened
-      - synchronize
-permissions: write-all
+    pull_request:
+        types: [opened, synchronize]
+
 jobs:
-  code_review:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-      - name: Code Review
-        uses: freeedcom/ai-codereviewer@main
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_API_MODEL: "gpt-4o-mini"
-          exclude: "yarn.lock,dist/**"
+    review:
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            pull-requests: write
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Run Code Review
+              uses: ./
+              with:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+                  TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+                  TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+                  OPENAI_API_MODEL: "gpt-4"
+                  BOT_NAME: "🤖 Code Review Bot"
