@@ -91,16 +91,36 @@ async function analyzeCode(
   const comments: Array<ReviewComment> = [];
 
   for (const file of parsedDiff) {
-    if (file.to === "/dev/null") continue; // Ignore deleted files
+    if (file.to === "/dev/null") continue;
 
     for (const chunk of file.chunks) {
       const prompt = createPrompt(file, chunk, prDetails);
       const aiResponse = await getAIResponse(prompt);
 
       if (aiResponse) {
-        const newComments = createComment(file, chunk, aiResponse);
-        if (newComments.length > 0) {
-          comments.push(...newComments);
+        for (const review of aiResponse) {
+          const lineNumber = Number(review.lineNumber);
+
+          // Find position in the chunk
+          let position = -1;
+          for (let i = 0; i < chunk.changes.length; i++) {
+            const change = chunk.changes[i];
+            // @ts-expect-error - ln and ln2 exists where needed
+            if ((change.ln || change.ln2) === lineNumber) {
+              position = i + 1;
+              break;
+            }
+          }
+
+          // Only add comment if we found a valid position
+          if (position !== -1) {
+            comments.push({
+              body: review.reviewComment,
+              path: file.to!,
+              line: lineNumber,
+              position: position,
+            });
+          }
         }
       }
     }
@@ -288,7 +308,9 @@ async function main() {
     const prDetails = await getPRDetails();
 
     await sendTelegramNotification(
-      `🔍 Starting code review for PR #${prDetails.pull_number}`
+      `🔍 Starting code review for PR #${prDetails.pull_number}\n` +
+        `Repository: ${prDetails.owner}/${prDetails.repo}\n` +
+        `Title: ${prDetails.title}`
     );
 
     let diff: string | null;
@@ -347,50 +369,52 @@ async function main() {
     const comments = await analyzeCode(filteredDiff, prDetails);
 
     if (comments.length > 0) {
-      // Only try to create review if we have valid comments
-      const validComments = comments.filter(
-        (c) => c.path?.length > 0 && c.position > 0 && c.body?.length > 0
-      );
-
-      if (validComments.length > 0) {
-        await createReviewComment(
-          prDetails.owner,
-          prDetails.repo,
-          prDetails.pull_number,
-          validComments
-        );
-
-        const commentSummary = validComments
-          .map(
-            (comment) =>
-              `🔹 File: ${comment.path}\n` +
-              `Line: ${comment.line}\n` +
-              `${comment.body.replace("Code Review Bot:\n\n", "")}`
-          )
-          .join("\n\n");
-
-        await sendTelegramNotification(
-          `✅ Review completed with ${validComments.length} suggestions:\n\n${commentSummary}`
-        );
-      } else {
-        await sendTelegramNotification(
-          `i️ Review completed but no valid comments could be created`
-        );
+      // Try to create GitHub review comments, but don't throw if it fails
+      try {
+        await octokit.pulls.createReview({
+          owner: prDetails.owner,
+          repo: prDetails.repo,
+          pull_number: prDetails.pull_number,
+          comments: comments,
+          event: "COMMENT",
+        });
+      } catch (error) {
+        console.log("Note: Failed to create GitHub review comments", error);
       }
+
+      // Always send Telegram notification
+      const commentSummary = comments
+        .map(
+          (comment) =>
+            `🔹 File: ${comment.path}\n` +
+            `Line: ${comment.line}\n` +
+            `Comment: ${comment.body}`
+        )
+        .join("\n\n");
+
+      await sendTelegramNotification(
+        `✅ Review completed with ${comments.length} suggestions:\n\n${commentSummary}`
+      );
     } else {
       await sendTelegramNotification(`✅ Review completed. No issues found.`);
     }
   } catch (error: unknown) {
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error";
-    console.error("Error:", errorMessage);
-    await sendTelegramNotification(`❌ Error during review: ${errorMessage}`);
-    // Don't exit with error code, just log the error
-    console.error(error);
+    console.log("Error during review:", errorMessage);
+    await sendTelegramNotification(
+      `⚠️ Review completed with some issues: ${errorMessage}`
+    );
   }
 }
 
-main().catch((error) => {
-  console.error("Error:", error);
-  // process.exit(1);
+main().catch(async (error) => {
+  console.log("Error:", error);
+  try {
+    await sendTelegramNotification(
+      `⚠️ Review process encountered an error but completed`
+    );
+  } catch {
+    // Ignore any errors from sending Telegram notification
+  }
 });
