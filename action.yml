@@ -2,41 +2,41 @@ name: "AI Code Review Action with Telegram"
 description: "Perform code reviews and comment on diffs using OpenAI API with Telegram notifications."
 
 inputs:
-    GITHUB_TOKEN:
-        description: "GitHub token to interact with the repository."
-        required: true
+  GITHUB_TOKEN:
+    description: "GitHub token to interact with the repository."
+    required: true
 
-    OPENAI_API_KEY:
-        description: "OpenAI API key for GPT."
-        required: true
+  OPENAI_API_KEY:
+    description: "OpenAI API key for GPT."
+    required: true
 
-    OPENAI_API_MODEL:
-        description: "OpenAI API model."
-        required: false
-        default: "gpt-4"
+  OPENAI_API_MODEL:
+    description: "OpenAI API model."
+    required: false
+    default: "gpt-4"
 
-    TELEGRAM_BOT_TOKEN:
-        description: "Telegram Bot Token for notifications"
-        required: true
+  TELEGRAM_BOT_TOKEN:
+    description: "Telegram Bot Token for notifications"
+    required: true
 
-    TELEGRAM_CHAT_ID:
-        description: "Telegram Chat ID to send notifications"
-        required: true
+  TELEGRAM_CHAT_ID:
+    description: "Telegram Chat ID to send notifications"
+    required: true
 
-    BOT_NAME:
-        description: "Name of the bot that will appear in comments"
-        required: false
-        default: "🤖 Code Review Bot"
+  BOT_NAME:
+    description: "Name of the bot that will appear in comments"
+    required: false
+    default: "🤖 Code Review Bot"
 
-    exclude:
-        description: "Glob patterns to exclude files from the diff analysis (comma-separated)"
-        required: false
-        default: "*.md,*.txt,package-lock.json,yarn.lock"
+  exclude:
+    description: "Glob patterns to exclude files from the diff analysis (comma-separated)"
+    required: false
+    default: "*.md,*.txt,package-lock.json,yarn.lock"
 
 runs:
-    using: "node20" # Updated to use Node.js 20
-    main: "dist/index.js"
+  using: "node20" # Updated to use Node.js 20
+  main: "dist/index.js"
 
 branding:
-    icon: "code"
-    color: "purple"
+  icon: "code"
+  color: "purple"
