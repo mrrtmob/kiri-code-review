@@ -1,5 +1,5 @@
 {
-  "name": "open-ai-reviewer",
+  "name": "kiri-code-reviewer",
   "version": "1.0.0",
   "description": "Open AI powered code reviews",
   "main": "lib/main.js",
