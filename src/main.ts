@@ -28,10 +28,24 @@ interface PRDetails {
 }
 
 interface ReviewComment {
+  body: string;
   path: string;
   line: number;
-  body: string;
+  commit_id: string;
   position: number;
+}
+
+async function getPRLatestCommit(
+  owner: string,
+  repo: string,
+  pull_number: number
+): Promise<string> {
+  const { data: pr } = await octokit.pulls.get({
+    owner,
+    repo,
+    pull_number,
+  });
+  return pr.head.sha;
 }
 
 async function sendTelegramNotification(message: string): Promise<void> {
@@ -90,6 +104,14 @@ async function analyzeCode(
 ): Promise<Array<ReviewComment>> {
   const comments: Array<ReviewComment> = [];
 
+  // Get commit_id once for all comments
+  const { data: pr } = await octokit.pulls.get({
+    owner: prDetails.owner,
+    repo: prDetails.repo,
+    pull_number: prDetails.pull_number,
+  });
+  const commitId = pr.head.sha;
+
   for (const file of parsedDiff) {
     if (file.to === "/dev/null") continue;
 
@@ -112,13 +134,13 @@ async function analyzeCode(
             }
           }
 
-          // Only add comment if we found a valid position
           if (position !== -1) {
             comments.push({
-              body: review.reviewComment,
+              body: `Code Review Bot:\n\n${review.reviewComment}`,
               path: file.to!,
               line: lineNumber,
               position: position,
+              commit_id: commitId,
             });
           }
         }
@@ -197,59 +219,59 @@ async function getAIResponse(prompt: string): Promise<Array<{
   }
 }
 
-function createComment(
-  file: File,
-  chunk: Chunk,
-  aiResponses: Array<{
-    lineNumber: string;
-    reviewComment: string;
-  }>
-): Array<ReviewComment> {
-  try {
-    return aiResponses
-      .flatMap((aiResponse) => {
-        if (!file.to) {
-          return [];
-        }
+// function createComment(
+//   file: File,
+//   chunk: Chunk,
+//   aiResponses: Array<{
+//     lineNumber: string;
+//     reviewComment: string;
+//   }>
+// ): Array<ReviewComment> {
+//   try {
+//     return aiResponses
+//       .flatMap((aiResponse) => {
+//         if (!file.to) {
+//           return [];
+//         }
 
-        const lineNumber = Number(aiResponse.lineNumber);
+//         const lineNumber = Number(aiResponse.lineNumber);
 
-        // Find the position within the chunk
-        let position = -1;
-        for (let i = 0; i < chunk.changes.length; i++) {
-          const change = chunk.changes[i];
-          // @ts-expect-error - ln and ln2 exists where needed
-          if ((change.ln || change.ln2) === lineNumber) {
-            position = i + 1;
-            break;
-          }
-        }
+//         // Find the position within the chunk
+//         let position = -1;
+//         for (let i = 0; i < chunk.changes.length; i++) {
+//           const change = chunk.changes[i];
+//           // @ts-expect-error - ln and ln2 exists where needed
+//           if ((change.ln || change.ln2) === lineNumber) {
+//             position = i + 1;
+//             break;
+//           }
+//         }
 
-        // Skip if position is invalid
-        if (position === -1) {
-          console.log(
-            `Skipping comment for line ${lineNumber} - invalid position`
-          );
-          return [];
-        }
+//         // Skip if position is invalid
+//         if (position === -1) {
+//           console.log(
+//             `Skipping comment for line ${lineNumber} - invalid position`
+//           );
+//           return [];
+//         }
 
-        return [
-          {
-            body: `Code Review Bot:\n\n${aiResponse.reviewComment}`,
-            path: file.to,
-            line: lineNumber,
-            position: position,
-          },
-        ];
-      })
-      .filter(
-        (comment) => comment.position > 0 && comment.path && comment.body
-      );
-  } catch (error) {
-    console.error("Error creating comment:", error);
-    return [];
-  }
-}
+//         return [
+//           {
+//             body: `Code Review Bot:\n\n${aiResponse.reviewComment}`,
+//             path: file.to,
+//             line: lineNumber,
+//             position: position,
+//           },
+//         ];
+//       })
+//       .filter(
+//         (comment) => comment.position > 0 && comment.path && comment.body
+//       );
+//   } catch (error) {
+//     console.error("Error creating comment:", error);
+//     return [];
+//   }
+// }
 
 async function createReviewComment(
   owner: string,
@@ -258,39 +280,32 @@ async function createReviewComment(
   comments: Array<ReviewComment>
 ): Promise<void> {
   try {
-    // Validate comments before attempting to create review
-    const validComments = comments.filter((comment) => {
-      const isValid =
-        comment.path?.length > 0 &&
-        comment.position > 0 &&
-        comment.body?.length > 0;
+    // Create comments one by one
+    for (const comment of comments) {
+      try {
+        await octokit.pulls.createReviewComment({
+          owner,
+          repo,
+          pull_number,
+          body: comment.body,
+          path: comment.path,
+          line: comment.line,
+          commit_id: comment.commit_id,
+          position: comment.position,
+        });
 
-      if (!isValid) {
-        console.log("Skipping invalid comment:", comment);
+        // Add a small delay between comments
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      } catch (error) {
+        console.log(
+          `Failed to create comment for ${comment.path}:${comment.line}`,
+          error
+        );
+        continue; // Continue with next comment if one fails
       }
-      return isValid;
-    });
-
-    if (validComments.length === 0) {
-      console.log("No valid comments to submit, skipping review creation");
-      return;
     }
-
-    await octokit.pulls.createReview({
-      owner,
-      repo,
-      pull_number,
-      comments: validComments,
-      event: "COMMENT",
-    });
   } catch (error) {
-    console.error("Error creating review:", error);
-    // Don't throw error, just log it
-    if (error instanceof Error) {
-      await sendTelegramNotification(
-        `⚠️ Note: Some comments could not be created: ${error.message}`
-      );
-    }
+    console.error("Error in createReviewComment:", error);
   }
 }
 
@@ -369,26 +384,20 @@ async function main() {
     const comments = await analyzeCode(filteredDiff, prDetails);
 
     if (comments.length > 0) {
-      // Try to create GitHub review comments, but don't throw if it fails
-      try {
-        await octokit.pulls.createReview({
-          owner: prDetails.owner,
-          repo: prDetails.repo,
-          pull_number: prDetails.pull_number,
-          comments: comments,
-          event: "COMMENT",
-        });
-      } catch (error) {
-        console.log("Note: Failed to create GitHub review comments", error);
-      }
+      // Create comments individually
+      await createReviewComment(
+        prDetails.owner,
+        prDetails.repo,
+        prDetails.pull_number,
+        comments
+      );
 
-      // Always send Telegram notification
       const commentSummary = comments
         .map(
           (comment) =>
             `🔹 File: ${comment.path}\n` +
             `Line: ${comment.line}\n` +
-            `Comment: ${comment.body}`
+            `Comment: ${comment.body.replace("Code Review Bot:\n\n", "")}`
         )
         .join("\n\n");
 
