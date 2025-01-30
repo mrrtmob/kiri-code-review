@@ -31,7 +31,7 @@ interface ReviewComment {
   path: string;
   line: number;
   body: string;
-  diff_hunk: string;
+  position: number;
 }
 
 async function sendTelegramNotification(message: string): Promise<void> {
@@ -70,14 +70,18 @@ async function getDiff(
   repo: string,
   pull_number: number
 ): Promise<string | null> {
-  const response = await octokit.pulls.get({
-    owner,
-    repo,
-    pull_number,
-    mediaType: { format: "diff" },
-  });
-  // @ts-expect-error - response.data is a string
-  return response.data;
+  try {
+    const response = await octokit.pulls.get({
+      owner,
+      repo,
+      pull_number,
+      mediaType: { format: "diff" },
+    });
+    return String(response.data);
+  } catch (error) {
+    console.error("Error getting diff:", error);
+    return null;
+  }
 }
 
 async function analyzeCode(
@@ -181,38 +185,38 @@ function createComment(
     reviewComment: string;
   }>
 ): Array<ReviewComment> {
-  return aiResponses.flatMap((aiResponse) => {
-    if (!file.to) {
-      return [];
-    }
+  return aiResponses
+    .flatMap((aiResponse) => {
+      if (!file.to) {
+        return [];
+      }
 
-    // Find the relevant line in the chunk
-    const lineNumber = Number(aiResponse.lineNumber);
-    const change = chunk.changes.find(
-      (c) =>
+      const lineNumber = Number(aiResponse.lineNumber);
+
+      // Find the position within the chunk
+      let position = -1;
+      for (let i = 0; i < chunk.changes.length; i++) {
+        const change = chunk.changes[i];
         // @ts-expect-error - ln and ln2 exists where needed
-        (c.ln || c.ln2) === lineNumber
-    );
+        if ((change.ln || change.ln2) === lineNumber) {
+          position = i + 1; // Position is 1-based
+          break;
+        }
+      }
 
-    if (!change) {
-      return [];
-    }
+      if (position === -1) {
+        console.log(`Could not find position for line ${lineNumber}`);
+        return [];
+      }
 
-    // Create the diff hunk context
-    const diffHunk = [
-      chunk.content,
-      ...chunk.changes
-        // @ts-expect-error - ln and ln2 exists where needed
-        .map((c) => `${c.ln ? c.ln : c.ln2} ${c.content}`),
-    ].join("\n");
-
-    return {
-      body: `Code Review Bot:\n\n${aiResponse.reviewComment}`,
-      path: file.to,
-      line: lineNumber,
-      diff_hunk: diffHunk,
-    };
-  });
+      return {
+        body: `Code Review Bot:\n\n${aiResponse.reviewComment}`,
+        path: file.to,
+        line: lineNumber,
+        position: position,
+      };
+    })
+    .filter((comment) => comment.position > 0);
 }
 
 async function createReviewComment(
@@ -222,10 +226,27 @@ async function createReviewComment(
   comments: Array<ReviewComment>
 ): Promise<void> {
   try {
-    // Filter out any invalid comments
-    const validComments = comments.filter(
-      (comment) => comment.path && comment.line > 0 && comment.diff_hunk
+    // Debug logging
+    console.log(
+      "Creating review with comments:",
+      JSON.stringify(comments, null, 2)
     );
+
+    const validComments = comments.filter((comment) => {
+      const isValid =
+        typeof comment.path === "string" &&
+        comment.path.length > 0 &&
+        typeof comment.position === "number" &&
+        comment.position > 0 &&
+        typeof comment.body === "string" &&
+        comment.body.length > 0;
+
+      if (!isValid) {
+        console.log("Invalid comment:", comment);
+      }
+
+      return isValid;
+    });
 
     if (validComments.length === 0) {
       console.log("No valid comments to submit");
@@ -245,6 +266,7 @@ async function createReviewComment(
       await sendTelegramNotification(
         `❌ Failed to create review comment: ${error.message}`
       );
+      throw error;
     }
   }
 }
@@ -263,16 +285,13 @@ async function main() {
     const prDetails = await getPRDetails();
 
     await sendTelegramNotification(
-      `🤖 New Code Review Started\n\n` +
-        `<b>Repository:</b> ${prDetails.owner}/${prDetails.repo}\n` +
-        `<b>PR Title:</b> ${prDetails.title}\n` +
-        `<b>PR Number:</b> #${prDetails.pull_number}`
+      `🤖 Starting code review for PR #${prDetails.pull_number}`
     );
 
-    let diff: string | null;
     const eventData = JSON.parse(
       readFileSync(process.env.GITHUB_EVENT_PATH ?? "", "utf8")
     );
+    let diff: string | null = null;
 
     if (eventData.action === "opened") {
       diff = await getDiff(
@@ -280,6 +299,7 @@ async function main() {
         prDetails.repo,
         prDetails.pull_number
       );
+      console.log("Got diff for opened PR");
     } else if (eventData.action === "synchronize") {
       const newBaseSha = eventData.before;
       const newHeadSha = eventData.after;
@@ -293,6 +313,7 @@ async function main() {
         head: newHeadSha,
       });
       diff = String(response.data);
+      console.log("Got diff for synchronized PR");
     } else {
       console.log("Unsupported event:", process.env.GITHUB_EVENT_NAME);
       return;
@@ -303,6 +324,7 @@ async function main() {
       return;
     }
 
+    console.log("Parsing diff...");
     const parsedDiff = parseDiff(diff);
     const excludePatterns = core
       .getInput("exclude")
@@ -315,9 +337,11 @@ async function main() {
       );
     });
 
+    console.log(`Analyzing ${filteredDiff.length} files...`);
     const comments = await analyzeCode(filteredDiff, prDetails);
 
     if (comments.length > 0) {
+      console.log(`Created ${comments.length} comments`);
       await createReviewComment(
         prDetails.owner,
         prDetails.repo,
@@ -328,32 +352,23 @@ async function main() {
       const commentSummary = comments
         .map(
           (comment) =>
-            `🔹 <b>File:</b> ${comment.path}\n` +
-            `<b>Line:</b> ${comment.line}\n` +
-            `<b>Comment:</b>\n${comment.body.replace(
-              "Code Review Bot:\n\n",
-              ""
-            )}`
+            `🔹 File: ${comment.path}\n` +
+            `Line: ${comment.line}\n` +
+            `${comment.body.replace("Code Review Bot:\n\n", "")}`
         )
         .join("\n\n");
 
       await sendTelegramNotification(
-        `✅ Code Review Completed\n\n` +
-          `Found ${comments.length} suggestions:\n\n${commentSummary}`
+        `✅ Review completed with ${comments.length} suggestions:\n\n${commentSummary}`
       );
     } else {
-      await sendTelegramNotification(
-        `✅ Code Review Completed\n\n` +
-          `No issues found in PR #${prDetails.pull_number}`
-      );
+      await sendTelegramNotification(`✅ Review completed. No issues found.`);
     }
   } catch (error: unknown) {
     const errorMessage =
-      error instanceof Error ? error.message : "An unknown error occurred";
+      error instanceof Error ? error.message : "Unknown error";
     console.error("Error:", errorMessage);
-    await sendTelegramNotification(
-      `❌ Error During Code Review\n\n${errorMessage}`
-    );
+    await sendTelegramNotification(`❌ Error: ${errorMessage}`);
     process.exit(1);
   }
 }
