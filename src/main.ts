@@ -9,7 +9,7 @@ import axios from "axios";
 const GITHUB_TOKEN: string = core.getInput("GITHUB_TOKEN");
 const OPENAI_API_KEY: string = core.getInput("OPENAI_API_KEY");
 const OPENAI_API_MODEL: string = core.getInput("OPENAI_API_MODEL");
-const BOT_NAME: string = core.getInput("BOT_NAME") || "🤖 Code Review Bot";
+const BOT_NAME: string = core.getInput("BOT_NAME") || "Code Review Bot";
 const TELEGRAM_BOT_TOKEN: string = core.getInput("TELEGRAM_BOT_TOKEN");
 const TELEGRAM_CHAT_ID: string = core.getInput("TELEGRAM_CHAT_ID");
 
@@ -171,7 +171,7 @@ function createComment(
     reviewComment: string;
   }>
 ): Array<{ body: string; path: string; line: number }> {
-  const NAME = BOT_NAME || "🤖 Code Review Bot";
+  const NAME = BOT_NAME || "Code Review Bot";
 
   return aiResponses.flatMap((aiResponse) => {
     if (!file.to) {
