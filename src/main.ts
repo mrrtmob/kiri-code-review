@@ -32,7 +32,7 @@ interface ReviewComment {
   path: string;
   line: number;
   commit_id: string;
-  position: number;
+  diff_hunk: string;
 }
 
 async function getPRLatestCommit(
@@ -113,7 +113,7 @@ async function analyzeCode(
   const commitId = pr.head.sha;
 
   for (const file of parsedDiff) {
-    if (file.to === "/dev/null") continue;
+    if (!file.to || file.to === "/dev/null") continue;
 
     for (const chunk of file.chunks) {
       const prompt = createPrompt(file, chunk, prDetails);
@@ -123,24 +123,34 @@ async function analyzeCode(
         for (const review of aiResponse) {
           const lineNumber = Number(review.lineNumber);
 
-          // Find position in the chunk
-          let position = -1;
-          for (let i = 0; i < chunk.changes.length; i++) {
-            const change = chunk.changes[i];
-            // @ts-expect-error - ln and ln2 exists where needed
-            if ((change.ln || change.ln2) === lineNumber) {
-              position = i + 1;
-              break;
-            }
-          }
+          // Find the change and its context
+          const changeIndex = chunk.changes.findIndex(
+            (change) =>
+              // @ts-expect-error - ln and ln2 exists where needed
+              (change.ln || change.ln2) === lineNumber
+          );
 
-          if (position !== -1) {
+          if (changeIndex !== -1) {
+            // Create diff_hunk with context
+            const startIndex = Math.max(0, changeIndex - 3);
+            const endIndex = Math.min(chunk.changes.length, changeIndex + 4);
+            const contextChanges = chunk.changes.slice(startIndex, endIndex);
+
+            const diff_hunk = [
+              chunk.content,
+              ...contextChanges.map(
+                (c) =>
+                  // @ts-expect-error - ln and ln2 exists where needed
+                  `${c.type || " "} ${c.ln ? c.ln : c.ln2} ${c.content}`
+              ),
+            ].join("\n");
+
             comments.push({
               body: `Code Review Bot:\n\n${review.reviewComment}`,
-              path: file.to!,
+              path: file.to,
               line: lineNumber,
-              position: position,
               commit_id: commitId,
+              diff_hunk: diff_hunk,
             });
           }
         }
@@ -283,6 +293,12 @@ async function createReviewComment(
     // Create comments one by one
     for (const comment of comments) {
       try {
+        console.log("Creating comment:", {
+          path: comment.path,
+          line: comment.line,
+          diff_hunk: comment.diff_hunk,
+        });
+
         await octokit.pulls.createReviewComment({
           owner,
           repo,
@@ -291,7 +307,8 @@ async function createReviewComment(
           path: comment.path,
           line: comment.line,
           commit_id: comment.commit_id,
-          position: comment.position,
+          side: "RIGHT",
+          diff_hunk: comment.diff_hunk,
         });
 
         // Add a small delay between comments
@@ -301,7 +318,9 @@ async function createReviewComment(
           `Failed to create comment for ${comment.path}:${comment.line}`,
           error
         );
-        continue; // Continue with next comment if one fails
+        // Log the full comment data for debugging
+        console.log("Comment data:", JSON.stringify(comment, null, 2));
+        continue;
       }
     }
   } catch (error) {
@@ -384,7 +403,6 @@ async function main() {
     const comments = await analyzeCode(filteredDiff, prDetails);
 
     if (comments.length > 0) {
-      // Create comments individually
       await createReviewComment(
         prDetails.owner,
         prDetails.repo,
