@@ -191,7 +191,7 @@ async function createReviewComment(
   pull_number: number,
   comments: Array<{ body: string; path: string; line: number }>
 ): Promise<void> {
-  const NAME = BOT_NAME || "Kiri Review"; // Get bot name from config
+  const sanitizedName = sanitizeText(BOT_NAME);
 
   await octokit.pulls.createReview({
     owner,
@@ -199,13 +199,21 @@ async function createReviewComment(
     pull_number,
     comments,
     event: "COMMENT",
-    name: NAME,
     headers: {
       "X-GitHub-Api-Version": "2022-11-28",
       Accept: "application/vnd.github.v3+json",
-      From: NAME,
+      From: sanitizedName || "Code Review Bot",
     },
   });
+}
+
+function sanitizeText(text: string): string {
+  return text
+    .replace(
+      /[\u{1F300}-\u{1F9FF}]|[\u{1F600}-\u{1F64F}]|[\u{1F680}-\u{1F6FF}]/gu,
+      ""
+    )
+    .trim();
 }
 
 async function main() {
