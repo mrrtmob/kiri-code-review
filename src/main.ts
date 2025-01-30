@@ -147,14 +147,14 @@ function createComment(
 		reviewComment: string;
 	}>
 ): Array<{ body: string; path: string; line: number }> {
-	const BOT_NAME = core.getInput("BOT_NAME") || "🤖 Code Review Bot";
+	const NAME = BOT_NAME || "🤖 Code Review Bot";
 
 	return aiResponses.flatMap((aiResponse) => {
 		if (!file.to) {
 			return [];
 		}
 		return {
-			body: `${BOT_NAME}:\n\n${aiResponse.reviewComment}`,
+			body: `${NAME}:\n\n${aiResponse.reviewComment}`,
 			path: file.to,
 			line: Number(aiResponse.lineNumber),
 		};
