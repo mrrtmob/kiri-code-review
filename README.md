@@ -1,70 +1,64 @@
-# AI Code Reviewer
+# Intellizzer: Your Intelligent Code Companion
 
-AI Code Reviewer is a GitHub Action that leverages OpenAI's GPT-4 API to provide intelligent feedback and suggestions on
-your pull requests. This powerful tool helps improve code quality and saves developers time by automating the code
-review process.
+Welcome to **Intellizzer**, the GitHub Action that transforms your code review process into a seamless and insightful experience! Powered by cutting-edge large language models, Intellizzer goes beyond traditional reviews, offering you a smart assistant that enhances code quality while saving you precious time.
 
-## Features
+## 🚀 Features That Elevate Your Coding Experience
 
-- Reviews pull requests using OpenAI's GPT-4 API.
-- Provides intelligent comments and suggestions for improving your code.
-- Filters out files that match specified exclude patterns.
-- Easy to set up and integrate into your GitHub workflow.
+- **Smart Code Reviews**: Let advanced models analyze your pull requests, providing you with sophisticated insights and recommendations.
+- **Constructive Feedback**: Receive tailored comments that help refine your code, making it cleaner and more efficient.
+- **Flexible File Filtering**: Easily exclude specific file types from reviews, ensuring your focus remains on the essentials.
+- **Effortless Integration**: Set up Intellizzer in your GitHub workflow with minimal hassle and get started right away!
 
-## Setup
+## 🔧 Quick Setup
 
-1. To use this GitHub Action, you need an OpenAI API key. If you don't have one, sign up for an API key
-   at [OpenAI](https://beta.openai.com/signup).
+Ready to revolutionize your code reviews? Follow these simple steps to get Intellizzer up and running:
 
-2. Add the OpenAI API key as a GitHub Secret in your repository with the name `OPENAI_API_KEY`. You can find more
-   information about GitHub Secrets [here](https://docs.github.com/en/actions/reference/encrypted-secrets).
+1. **Get Your API Key**:
+   - For **Blizzer API**: Sign up for an API key at [Blizzer](https://api.blizzer.tech) if you don’t have one yet.
+   - For **OpenAI-Compatible Endpoint**: Sign up for an API key from your preferred service that offers OpenAI-compatible endpoints.
 
-3. Create a `.github/workflows/main.yml` file in your repository and add the following content:
+2. **Store Your API Key**: In your GitHub repository, add your API key as a secret named `API_KEY`. Check out the [GitHub Secrets documentation](https://docs.github.com/en/actions/reference/encrypted-secrets) for guidance.
 
-```yaml
-name: AI Code Reviewer
+3. **Create Your Workflow File**:
+   - In your repository, create a `.github/workflows/main.yml` file and include the following configuration:
 
-on:
-  pull_request:
-    types:
-      - opened
-      - synchronize
-permissions: write-all
-jobs:
-  review:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v3
+   ```yaml
+   name: Intellizzer Code Reviewer
+   on:
+     pull_request:
+       types:
+         - opened
+         - synchronize
+   permissions: write-all
+   jobs:
+     review:
+       runs-on: ubuntu-latest
+       steps:
+         - name: Checkout Repository
+           uses: actions/checkout@v3
+         - name: Intellizzer Code Reviewer
+           uses: your-username/intellizzer@main
+           with:
+             GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Default token for authentication.
+             API_KEY: ${{ secrets.API_KEY }}
+             API_ENDPOINT: "https://api.blizzer.tech" # For Blizzer API endpoint
+             API_MODEL: "kiri2.0" # For Blizzer model
+             MODEL_TYPE: "openai" # Use "openai" for OpenAI-compatible models, if applicable
+             exclude: "**/*.json, **/*.md" # Optional: specify file patterns to exclude
+   ```
 
-      - name: AI Code Reviewer
-        uses: your-username/ai-code-reviewer@main
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # The GITHUB_TOKEN is there by default so you just need to keep it like it is and not necessarily need to add it as secret as it will throw an error. [More Details](https://docs.github.com/en/actions/security-guides/automatic-token-authentication#about-the-github_token-secret)
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_API_MODEL: "gpt-4" # Optional: defaults to "gpt-4"
-          exclude: "**/*.json, **/*.md" # Optional: exclude patterns separated by commas
-```
+4. **Customize Your Username**: Replace `your-username` with your GitHub username or organization where the Intellizzer repository is hosted.
+5. **Tailor Your Excludes**: Modify the `exclude` parameter to focus on the files that matter most to you.
+6. **Commit Your Changes**: Save your setup, and watch as Intellizzer elevates your pull requests from ordinary to extraordinary!
 
-4. Replace `your-username` with your GitHub username or organization name where the AI Code Reviewer repository is
-   located.
+## ✨ How Does It Work?
 
-5. Customize the `exclude` input if you want to ignore certain file patterns from being reviewed.
+When you submit a pull request, Intellizzer springs into action! It analyzes the changes, filters out the files you want to exclude, and sends the code snippets to the specified API. With its advanced analysis, you'll receive impactful review comments that are automatically added to your pull request, guiding you toward a polished final product.
 
-6. Commit the changes to your repository, and AI Code Reviewer will start working on your future pull requests.
+## 🤝 Contribute to Intellizzer!
 
-## How It Works
+We thrive on collaboration! If you have ideas, suggestions, or improvements, we’d love to hear from you. Feel free to submit issues or pull requests to help enhance the Intellizzer GitHub Action.
 
-The AI Code Reviewer GitHub Action retrieves the pull request diff, filters out excluded files, and sends code chunks to
-the OpenAI API. It then generates review comments based on the AI's response and adds them to the pull request.
+## 📝 License
 
-## Contributing
-
-Contributions are welcome! Please feel free to submit issues or pull requests to improve the AI Code Reviewer GitHub
-Action.
-
-Let the maintainer generate the final package (`yarn build` & `yarn package`).
-
-## License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for more information.
+This project is proudly licensed under the MIT License. For further details, check out the [LICENSE](LICENSE) file.
