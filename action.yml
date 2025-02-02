@@ -1,5 +1,5 @@
-name: "AI Code Review Action with Telegram"
-description: "Perform code reviews and comment on diffs using OpenAI API with Telegram notifications."
+name: "Intellizzer"
+description: "Intelligent GitHub Action that transforms code reviews using advanced language models, providing sophisticated insights and recommendations for your pull requests"
 
 inputs:
   GITHUB_TOKEN:
@@ -13,7 +13,7 @@ inputs:
   OPENAI_API_MODEL:
     description: "OpenAI API model."
     required: false
-    default: "gpt-4"
+    default: "gpt-4o"
 
   TELEGRAM_BOT_TOKEN:
     description: "Telegram Bot Token for notifications"
